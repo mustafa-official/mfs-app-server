@@ -1,5 +1,5 @@
 const express = require('express');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
@@ -28,77 +28,42 @@ async function run() {
         await client.connect();
         const userCollection = client.db("mfsAppDB").collection('users');
 
-        // jwt 
-        // app.post('/jwt', async (req, res) => {
-        //     const user = req.body;
-        //     const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        //         expiresIn: '1h'
-        //     })
-        //     res.send({ token })
-        // })
+        // JWT token generation middleware
+        const generateAccessToken = (id, role) => {
+            return jwt.sign({ id, role }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+        };
 
-        //middleware verify
         const verifyToken = (req, res, next) => {
-            // console.log('inside verify token', req.headers);
-            if (!req.headers.authorization) {
-                return res.status(401).send({ message: 'unauthorize access' })
+            if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) {
+                return res.status(401).json({ message: 'Unauthorized' });
             }
-            const token = req.headers.authorization.split(' ')[1]
+            const token = req.headers.authorization.split(' ')[1];
             jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
                 if (err) {
-                    return res.status(401).send({ message: 'unauthorize access' })
+                    return res.status(401).json({ message: 'Unauthorized' });
                 }
-                req.decoded = decoded;
+                req.user = decoded;
                 next();
-            })
+            });
+        };
 
-        }
-
-        //register
-        // app.post('/register', async (req, res) => {
-        //     const { name, email, mobile, role, pin } = req.body;
-        //     //hash pin
-        //     const saltRound = 10;
-        //     const hash_pin = await bcrypt.hash(pin, saltRound);
-        //     const user = { name, email, mobile, role, pin: hash_pin }
-        //     const result = await userCollection.insertOne(user);
-        //     res.send(result)
-        // })
-
-        // Login
-        // app.post('/login', async (req, res) => {
-        //     const { identifier, pin } = req.body;
-        //     const user = await userCollection.findOne({
-        //         $or: [{ email: identifier }, { mobile: identifier }],
-        //     });
-
-        //     if (user) {
-        //         const isMatch = await bcrypt.compare(pin, user.pin);
-        //         if (isMatch) {
-        //             res.send({ data: "match" });
-        //         } else {
-        //             res.send({ data: "Invalid Pin" });
-        //         }
-        //     } else {
-        //         res.send({ data: "User Not Found" });
-        //     }
-        // });
-
+        // Register endpoint
         app.post('/register', async (req, res) => {
-            const { name, email, mobile, role, pin } = req.body;
+            const { name, email, mobile, role, pin, balance, status } = req.body;
             const saltRound = 10;
             const hash_pin = await bcrypt.hash(pin, saltRound);
-            const user = { name, email, mobile, role, pin: hash_pin };
+            const user = { name, email, mobile, role, pin: hash_pin, balance, status };
             const result = await userCollection.insertOne(user);
 
             if (result.insertedId) {
-                const token = jwt.sign({ id: result.insertedId, role: user.role }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+                const token = generateAccessToken(result.insertedId, user.role);
                 res.send({ data: "register successful", token });
             } else {
                 res.send({ data: "registration failed" });
             }
         });
 
+        // Login endpoint
         app.post('/login', async (req, res) => {
             const { identifier, pin } = req.body;
             const user = await userCollection.findOne({
@@ -108,7 +73,7 @@ async function run() {
             if (user) {
                 const isMatch = await bcrypt.compare(pin, user.pin);
                 if (isMatch) {
-                    const token = jwt.sign({ id: user._id, role: user.role }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+                    const token = generateAccessToken(user._id, user.role);
                     res.send({ data: "match", token });
                 } else {
                     res.send({ data: "Invalid Pin" });
@@ -119,10 +84,47 @@ async function run() {
         });
 
 
+        app.get('/user/:identifier', verifyToken, async (req, res) => {
+            const identifier = req.params.identifier;
+            const user = await userCollection.findOne({
+                $or: [{ email: identifier }, { mobile: identifier }],
+            });
 
+            if (user) {
+                res.send(user);
+            } else {
+                res.status(404).send({ message: "User Not Found" });
+            }
+        });
 
+        //all user and agent (Admin)
+        app.get('/users', async (req, res) => {
+            const result = await userCollection.find({ role: { $in: ['user', 'agent'] } }).toArray();
+            res.send(result);
+        })
 
+        //activate user (Admin)
+        app.patch('/user/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) };
+            const update = {
+                $inc: { balance: 40 },
+                $set: { status: 'activate' }
+            }
+            const result = await userCollection.updateOne(filter, update);
+            res.send(result)
+        })
 
+         //block user (Admin)
+        app.patch('/block-user/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) };
+            const update = {
+                $set: { status: 'block' }
+            }
+            const result = await userCollection.updateOne(filter, update);
+            res.send(result)
+        })
 
 
         // Send a ping to confirm a successful connection
