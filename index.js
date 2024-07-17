@@ -97,13 +97,13 @@ async function run() {
             }
         });
 
-        //all user and agent (Admin)
+        //all user and agent (Admin) -------
         app.get('/users', async (req, res) => {
             const result = await userCollection.find({ role: { $in: ['user', 'agent'] } }).toArray();
             res.send(result);
         })
 
-        //activate user (Admin)
+        //activate user (Admin) -------
         app.patch('/user/:id', async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
@@ -115,7 +115,7 @@ async function run() {
             res.send(result)
         })
 
-        //block user (Admin)
+        //block user (Admin) -------
         app.patch('/block-user/:id', async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
@@ -126,10 +126,10 @@ async function run() {
             res.send(result)
         })
 
-        //send money
+        //send money -------
         app.patch('/send-money', async (req, res) => {
             const { mobile, amount, pin, userEmail } = req.body;
-            
+
             // Find logged-in user by their mobile number
             const loggedInUser = await userCollection.findOne({ email: userEmail });
 
@@ -167,6 +167,57 @@ async function run() {
 
         });
 
+        //cash out -------
+        app.patch('/cash-out', async (req, res) => {
+            const { mobile, amount, pin, userEmail } = req.body;
+            console.log(mobile, amount, pin, userEmail);
+            // Find logged in user by email -------
+            const loggedInUser = await userCollection.findOne({ email: userEmail });
+
+            if (!loggedInUser) {
+                return res.send({ data: "User not found" });
+            }
+
+            // Compare the provided pin with the hashed pin in the database -------
+            const isMatch = await bcrypt.compare(pin, loggedInUser.pin);
+
+            if (!isMatch) {
+                return res.send({ data: "Invalid Pin" });
+            }
+
+            // Find the agent by mobile number -------
+            const agent = await userCollection.findOne({ mobile, role: 'agent' });
+
+            if (!agent) {
+                return res.send({ data: "Invalid agent account" });
+            }
+
+            // Calculate the cash-out amount and fee -------
+            const fee = amount * 0.015;
+            const totalDeduct = amount + fee;
+
+            if (loggedInUser.balance < totalDeduct) {
+                return res.send({ data: "Insufficient balance" });
+            }
+
+            // Update balances: deduct from user and add to agent-------
+            const userUpdate = {
+                $inc: { balance: -totalDeduct }
+            };
+            const agentUpdate = {
+                $inc: { balance: amount + fee }
+            };
+
+            const userResult = await userCollection.updateOne({ _id: new ObjectId(loggedInUser._id) }, userUpdate);
+            const agentResult = await userCollection.updateOne({ _id: new ObjectId(agent._id) }, agentUpdate);
+            res.send({
+                userResult,
+                agentResult,
+                data: "Cash out successful"
+            });
+
+
+        });
 
 
         // Send a ping to confirm a successful connection
