@@ -63,7 +63,7 @@ async function run() {
             }
         });
 
-        // Login endpoint
+        // Login
         app.post('/login', async (req, res) => {
             const { identifier, pin } = req.body;
             const user = await userCollection.findOne({
@@ -115,7 +115,7 @@ async function run() {
             res.send(result)
         })
 
-         //block user (Admin)
+        //block user (Admin)
         app.patch('/block-user/:id', async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
@@ -125,6 +125,48 @@ async function run() {
             const result = await userCollection.updateOne(filter, update);
             res.send(result)
         })
+
+        //send money
+        app.patch('/send-money', async (req, res) => {
+            const { mobile, amount, pin, userEmail } = req.body;
+            
+            // Find logged-in user by their mobile number
+            const loggedInUser = await userCollection.findOne({ email: userEmail });
+
+            if (!loggedInUser) {
+                return res.send({ data: "User not found" });
+            }
+
+            // Compare the provided pin with the hashed pin in the database
+            const isMatch = await bcrypt.compare(pin, loggedInUser.pin);
+
+            if (!isMatch) {
+                return res.send({ data: "Invalid Pin" });
+            }
+
+            // Find the target user by their mobile number
+            const targetUser = await userCollection.findOne({ mobile, role: 'user' });
+
+            if (!targetUser) {
+                return res.send({ data: "Invalid account" });
+            }
+
+            // Calculate the final amount, including the fee if applicable
+            let finalAmount = parseInt(amount, 10);
+            const fee = finalAmount > 100 ? 5 : 0;
+            finalAmount = finalAmount - fee;
+
+            // Update the target users balance
+            const filter = { _id: new ObjectId(targetUser._id) };
+            const update = {
+                $inc: { balance: finalAmount }
+            };
+
+            const result = await userCollection.updateOne(filter, update);
+            res.send(result)
+
+        });
+
 
 
         // Send a ping to confirm a successful connection
