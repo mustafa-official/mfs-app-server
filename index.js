@@ -27,6 +27,7 @@ async function run() {
         // Connect the client to the server	(optional starting in v4.7)
         await client.connect();
         const userCollection = client.db("mfsAppDB").collection('users');
+        const transactionCollection = client.db("mfsAppDB").collection('transaction');
 
         // JWT token generation middleware
         const generateAccessToken = (id, role) => {
@@ -161,8 +162,10 @@ async function run() {
             const update = {
                 $inc: { balance: finalAmount }
             };
-
+            const senderPhone = await userCollection.findOne({ email: userEmail })
+            // console.log("sender phoooooooone", senderPhone.mobile);
             const result = await userCollection.updateOne(filter, update);
+            const transactionHistory = await transactionCollection.insertOne({ receiverMobile: mobile, senderMobile: senderPhone.mobile, amount, type: 'Send Money', date: new Date().toLocaleString() })
             res.send(result)
 
         });
@@ -219,6 +222,52 @@ async function run() {
 
         });
 
+        //cashin request to  agent
+        app.post('/cashin-request', async (req, res) => {
+            const { mobile, amount, userMobile } = req.body;
+            const agent = await userCollection.findOne({ mobile, role: 'agent' });
+            if (!agent) {
+                return res.send({ data: 'Invalid Agent' });
+            }
+
+            const cashInRequest = {
+                userMobile,
+                agentMobile: mobile,
+                agentEmail: agent.email,
+                amount,
+                status: 'pending',
+                type: 'Cash In',
+                createdAt: new Date().toLocaleString(),
+            };
+            const result = await transactionCollection.insertOne(cashInRequest);
+            res.send(result);
+
+        })
+
+        //get all transaction request in agent role
+        app.get('/transaction-request/:email', async (req, res) => {
+            const email = req.params.email;
+            const query = { agentEmail: email, status: { $in: ['pending', 'success'] } }
+            const result = await transactionCollection.find(query).toArray();
+            res.send(result);
+        })
+
+        // cashin-approve in agent role
+        app.patch('/cashin-approve/:id', async (req, res) => {
+            const id = req.params.id;
+            const { userMobile, agentMobile, amount, } = req.body;
+
+
+            const userUpdate = { $inc: { balance: amount } };
+            const userResult = await userCollection.updateOne({ mobile: userMobile }, userUpdate);
+
+            const agentUpdate = { $inc: { balance: -amount } };
+            const agentResult = await userCollection.updateOne({ mobile: agentMobile }, agentUpdate);
+
+            const transactionResult = await transactionCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: 'success' } });
+            res.send({ userResult, agentResult, transactionResult })
+
+        })
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
