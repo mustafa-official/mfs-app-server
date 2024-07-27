@@ -100,7 +100,8 @@ async function run() {
 
         //all user and agent (Admin) -------
         app.get('/users', async (req, res) => {
-            const result = await userCollection.find({ role: { $in: ['user', 'agent'] } }).toArray();
+            const searchValue = req.query.name?.toLowerCase() || "";
+            const result = await userCollection.find({ name: { $regex: new RegExp(searchValue, 'i') }, role: { $in: ['user', 'agent'] } }).toArray();
             res.send(result);
         })
 
@@ -165,7 +166,7 @@ async function run() {
             const senderPhone = await userCollection.findOne({ email: userEmail })
             // console.log("sender phoooooooone", senderPhone.mobile);
             const result = await userCollection.updateOne(filter, update);
-            const transactionHistory = await transactionCollection.insertOne({ receiverMobile: mobile, senderMobile: senderPhone.mobile, amount, type: 'Send Money', date: new Date().toLocaleString() })
+            const transactionHistory = await transactionCollection.insertOne({ userMobile: senderPhone.mobile, receiverMobile: mobile, amount, type: 'Send Money', date: new Date().toLocaleString() })
             res.send(result)
 
         });
@@ -213,11 +214,13 @@ async function run() {
 
             const userResult = await userCollection.updateOne({ _id: new ObjectId(loggedInUser._id) }, userUpdate);
             const agentResult = await userCollection.updateOne({ _id: new ObjectId(agent._id) }, agentUpdate);
+            const transactionHistory = await transactionCollection.insertOne({ userMobile: loggedInUser.mobile, receiverMobile: mobile, amount, type: 'Cash Out', date: new Date().toLocaleString() })
             res.send({
                 userResult,
                 agentResult,
                 data: "Cash out successful"
             });
+
 
 
         });
@@ -232,12 +235,12 @@ async function run() {
 
             const cashInRequest = {
                 userMobile,
-                agentMobile: mobile,
-                agentEmail: agent.email,
+                receiverMobile: mobile,
+                receiverEmail: agent.email,
                 amount,
                 status: 'pending',
                 type: 'Cash In',
-                createdAt: new Date().toLocaleString(),
+                date: new Date().toLocaleString(),
             };
             const result = await transactionCollection.insertOne(cashInRequest);
             res.send(result);
@@ -247,7 +250,7 @@ async function run() {
         //get all transaction request in agent role
         app.get('/transaction-request/:email', async (req, res) => {
             const email = req.params.email;
-            const query = { agentEmail: email, status: { $in: ['pending', 'success'] } }
+            const query = { receiverEmail: email, status: { $in: ['pending', 'success'] } }
             const result = await transactionCollection.find(query).toArray();
             res.send(result);
         })
@@ -255,19 +258,44 @@ async function run() {
         // cashin-approve in agent role
         app.patch('/cashin-approve/:id', async (req, res) => {
             const id = req.params.id;
-            const { userMobile, agentMobile, amount, } = req.body;
+            const { userMobile, receiverMobile, amount, } = req.body;
 
 
             const userUpdate = { $inc: { balance: amount } };
             const userResult = await userCollection.updateOne({ mobile: userMobile }, userUpdate);
 
             const agentUpdate = { $inc: { balance: -amount } };
-            const agentResult = await userCollection.updateOne({ mobile: agentMobile }, agentUpdate);
+            const agentResult = await userCollection.updateOne({ mobile: receiverMobile }, agentUpdate);
 
             const transactionResult = await transactionCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: 'success' } });
             res.send({ userResult, agentResult, transactionResult })
 
         })
+
+        //transaction history
+        app.get('/transaction-history/:mobile', async (req, res) => {
+            const mobile = req.params.mobile;
+            const query = { userMobile: mobile };
+            const result = await transactionCollection.find(query).sort({ date: -1 }).limit(10).toArray();
+            res.send(result);
+
+        })
+        
+        //transaction history for agent
+        app.get('/trans-history-agent', async (req, res) => {
+            const mobile = req.query.mobile;
+            const query = { receiverMobile: mobile };
+            const result = await transactionCollection.find(query).sort({ date: -1 }).limit(20).toArray();
+            res.send(result);
+
+        })
+
+        //get all transaction in admin
+        app.get('/transactions', async (req, res) => {
+            const result = await transactionCollection.find().toArray();
+            res.send(result);
+        })
+
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
