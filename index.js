@@ -48,9 +48,15 @@ async function run() {
             });
         };
 
-        // Register endpoint
+        // Register 
         app.post('/register', async (req, res) => {
             const { name, email, mobile, role, pin, balance, status } = req.body;
+            const existingUser = await userCollection.findOne({
+                $or: [{ email }, { mobile }]
+            });
+            if (existingUser) {
+                return res.send({ data: "already created" })
+            }
             const saltRound = 10;
             const hash_pin = await bcrypt.hash(pin, saltRound);
             const user = { name, email, mobile, role, pin: hash_pin, balance, status };
@@ -60,7 +66,7 @@ async function run() {
                 const token = generateAccessToken(result.insertedId, user.role);
                 res.send({ data: "register successful", token });
             } else {
-                res.send({ data: "registration failed" });
+               return res.send({ data: "registration failed" });
             }
         });
 
@@ -280,7 +286,7 @@ async function run() {
             res.send(result);
 
         })
-        
+
         //transaction history for agent
         app.get('/trans-history-agent', async (req, res) => {
             const mobile = req.query.mobile;
