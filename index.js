@@ -7,8 +7,18 @@ const bcrypt = require('bcrypt');
 require('dotenv').config();
 const port = process.env.PORT || 5000;
 
+const corsOptions = {
+    origin: [
+        "http://localhost:5173",
+        "https://subidha-pay.web.app",
+        "https://subidha-pay.firebaseapp.com"
+    ],
+    credentials: true,
+    optionSuccessStatus: 200,
+
+}
 //middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.elzgrcu.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
@@ -25,7 +35,7 @@ const client = new MongoClient(uri, {
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+        // await client.connect();
         const userCollection = client.db("mfsAppDB").collection('users');
         const transactionCollection = client.db("mfsAppDB").collection('transaction');
 
@@ -48,6 +58,7 @@ async function run() {
             });
         };
 
+
         // Register 
         app.post('/register', async (req, res) => {
             const { name, email, mobile, role, pin, balance, status } = req.body;
@@ -66,7 +77,7 @@ async function run() {
                 const token = generateAccessToken(result.insertedId, user.role);
                 res.send({ data: "register successful", token });
             } else {
-               return res.send({ data: "registration failed" });
+                return res.send({ data: "registration failed" });
             }
         });
 
@@ -105,18 +116,20 @@ async function run() {
         });
 
         //all user and agent (Admin) -------
-        app.get('/users', async (req, res) => {
+        app.get('/users', verifyToken, async (req, res) => {
             const searchValue = req.query.name?.toLowerCase() || "";
             const result = await userCollection.find({ name: { $regex: new RegExp(searchValue, 'i') }, role: { $in: ['user', 'agent'] } }).toArray();
             res.send(result);
         })
 
         //activate user (Admin) -------
-        app.patch('/user/:id', async (req, res) => {
+        app.patch('/user/:id', verifyToken, async (req, res) => {
             const id = req.params.id;
+            const { role } = req.query;
             const filter = { _id: new ObjectId(id) };
+            const incrementValue = role === 'agent' ? 10000 : 40;
             const update = {
-                $inc: { balance: 40 },
+                $inc: { balance: incrementValue },
                 $set: { status: 'activate' }
             }
             const result = await userCollection.updateOne(filter, update);
@@ -124,7 +137,7 @@ async function run() {
         })
 
         //block user (Admin) -------
-        app.patch('/block-user/:id', async (req, res) => {
+        app.patch('/block-user/:id', verifyToken, async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
             const update = {
@@ -135,7 +148,7 @@ async function run() {
         })
 
         //send money -------
-        app.patch('/send-money', async (req, res) => {
+        app.patch('/send-money', verifyToken, async (req, res) => {
             const { mobile, amount, pin, userEmail } = req.body;
 
             // Find logged-in user by their mobile number
@@ -178,7 +191,7 @@ async function run() {
         });
 
         //cash out -------
-        app.patch('/cash-out', async (req, res) => {
+        app.patch('/cash-out', verifyToken, async (req, res) => {
             const { mobile, amount, pin, userEmail } = req.body;
             console.log(mobile, amount, pin, userEmail);
             // Find logged in user by email -------
@@ -232,7 +245,7 @@ async function run() {
         });
 
         //cashin request to  agent
-        app.post('/cashin-request', async (req, res) => {
+        app.post('/cashin-request', verifyToken, async (req, res) => {
             const { mobile, amount, userMobile } = req.body;
             const agent = await userCollection.findOne({ mobile, role: 'agent' });
             if (!agent) {
@@ -254,7 +267,7 @@ async function run() {
         })
 
         //get all transaction request in agent role
-        app.get('/transaction-request/:email', async (req, res) => {
+        app.get('/transaction-request/:email', verifyToken, async (req, res) => {
             const email = req.params.email;
             const query = { receiverEmail: email, status: { $in: ['pending', 'success'] } }
             const result = await transactionCollection.find(query).toArray();
@@ -262,7 +275,7 @@ async function run() {
         })
 
         // cashin-approve in agent role
-        app.patch('/cashin-approve/:id', async (req, res) => {
+        app.patch('/cashin-approve/:id', verifyToken, async (req, res) => {
             const id = req.params.id;
             const { userMobile, receiverMobile, amount, } = req.body;
 
@@ -279,7 +292,7 @@ async function run() {
         })
 
         //transaction history
-        app.get('/transaction-history/:mobile', async (req, res) => {
+        app.get('/transaction-history/:mobile', verifyToken, async (req, res) => {
             const mobile = req.params.mobile;
             const query = { userMobile: mobile };
             const result = await transactionCollection.find(query).sort({ date: -1 }).limit(10).toArray();
@@ -288,7 +301,7 @@ async function run() {
         })
 
         //transaction history for agent
-        app.get('/trans-history-agent', async (req, res) => {
+        app.get('/trans-history-agent', verifyToken, async (req, res) => {
             const mobile = req.query.mobile;
             const query = { receiverMobile: mobile };
             const result = await transactionCollection.find(query).sort({ date: -1 }).limit(20).toArray();
@@ -297,14 +310,14 @@ async function run() {
         })
 
         //get all transaction in admin
-        app.get('/transactions', async (req, res) => {
+        app.get('/transactions', verifyToken, async (req, res) => {
             const result = await transactionCollection.find().toArray();
             res.send(result);
         })
 
 
         // Send a ping to confirm a successful connection
-        await client.db("admin").command({ ping: 1 });
+        // await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
         // Ensures that the client will close when you finish/error
